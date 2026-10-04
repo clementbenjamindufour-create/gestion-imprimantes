@@ -1,0 +1,89 @@
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Navigation principale">
+    <a class="brand" routerLink="/library"><span class="brand-mark">◈</span><span>atelier<span class="brand-subtitle">BIBLIOTHÈQUE 3D</span></span></a>
+    <div class="sidebar-section">ESPACE DE TRAVAIL</div>
+    <a class="nav-item" [class.active]="!projectId()" routerLink="/library"><span>▦</span> Tous les fichiers <span class="nav-count">{{ files().length }}</span></a>
+    <div class="project-heading"><span class="sidebar-section">MES PROJETS</span><button class="icon-button" aria-label="Créer un projet" (click)="showCreate.set(!showCreate())">+</button></div>
+    @if (showCreate()) {
+      <form class="new-project" (ngSubmit)="createProject()">
+        <label for="project-name">Nom du projet</label>
+        <input id="project-name" name="projectName" [(ngModel)]="projectName" maxlength="255" placeholder="Ex. Boîtier capteur" required>
+        <div class="form-actions"><button class="button small" [disabled]="busy() || !projectName.trim()">Créer</button><button type="button" class="text-button" (click)="showCreate.set(false)">Annuler</button></div>
+      </form>
+    }
+    <nav class="project-nav" aria-label="Projets">
+      @for (item of projects(); track item.id) {
+        <a class="nav-item" [class.active]="projectId() === item.id" [routerLink]="['/projects', item.id]"><span class="folder">▱</span><span class="project-name">{{ item.name }}</span></a>
+      } @empty {
+        <p class="sidebar-empty">Tes projets apparaîtront ici.</p>
+      }
+    </nav>
+    <div class="sidebar-footer"><span class="status-dot"></span> Ton espace de fabrication<span>Fichiers, projets et idées réunis.</span></div>
+  </aside>
+
+  <main>
+    <header class="topbar"><span>Mon atelier <span class="breadcrumb">/ {{ projectId() ? 'Projets' : 'Bibliothèque' }}</span></span><button class="text-button" (click)="reload()" [disabled]="busy() || loading()">↻ Actualiser</button></header>
+    <div class="content">
+      <section class="page-heading">
+        <div><div class="eyebrow">{{ projectId() ? 'PROJET' : 'DU MODÈLE À L’IMPRESSION' }}</div><h1>{{ projectId() ? (project()?.name ?? 'Projet') : 'Ta bibliothèque de fabrication' }}</h1><p>{{ projectId() ? 'Les fichiers et les notes qui donnent vie à ton projet.' : 'Conserve tes modèles, tes fichiers slicés et tout ce qui les accompagne.' }}</p></div>
+        <button class="button" aria-label="Importer un fichier" (click)="showImport.set(!showImport())" [disabled]="busy()"><span aria-hidden="true">↑</span> Importer un fichier</button>
+      </section>
+
+      @if (error()) { <div class="message error" role="alert">{{ error() }} <button class="text-button" (click)="reload()" [disabled]="busy()">Réessayer</button></div> }
+      @if (notice()) { <div class="message success" role="status">{{ notice() }}</div> }
+
+      @if (showImport()) {
+        <section class="panel import-panel" aria-labelledby="import-title">
+          <div class="panel-heading"><h2 id="import-title">Ajouter à la bibliothèque</h2><button class="text-button" (click)="showImport.set(false)" [disabled]="busy()">Fermer</button></div>
+          <form (ngSubmit)="importFile(fileInput)">
+            <label class="upload-area" for="upload-file"><span class="upload-icon">↑</span><strong>{{ selectedFile()?.name ?? 'Choisir un fichier' }}</strong><span>Tous les formats sont les bienvenus : STL, GOO, GCODE, images, documents…</span><input #fileInput id="upload-file" type="file" (change)="chooseFile($event)" [disabled]="busy()" required></label>
+            <div class="import-options"><div class="field"><label for="file-state">État <span class="optional">facultatif</span></label><input id="file-state" name="fileState" [(ngModel)]="fileState" placeholder="Ex. À slicer, supports à vérifier…" [disabled]="busy()"></div>
+            @if (projectId()) { <label class="checkbox-label"><input type="checkbox" name="attachImport" [(ngModel)]="attachImport" [disabled]="busy()"> Lier à ce projet</label> }
+            <button class="button" [disabled]="busy() || !selectedFile()">{{ busy() ? 'Import en cours…' : 'Importer' }}</button></div>
+          </form>
+        </section>
+      }
+
+      <section class="stats" aria-label="Résumé"><div><span class="stat-label">Fichiers {{ projectId() ? 'du projet' : 'conservés' }}</span><strong>{{ scopedFiles().length }}<span>éléments</span></strong></div><div><span class="stat-label">Liés à l’impression</span><strong>{{ printFileCount() }}<span>modèles & fichiers slicés</span></strong></div><div><span class="stat-label">{{ projectId() ? 'Notes du projet' : 'Projets' }}</span><strong>{{ projectId() ? (project()?.notes?.length ?? 0) : projects().length }}<span>{{ projectId() ? 'idées & observations' : 'espaces de travail' }}</span></strong></div></section>
+
+      @if (projectId() && project()) {
+        <section class="link-panel"><div><h2>Lier un fichier existant</h2><p>Réutilise un fichier de ta bibliothèque dans ce projet.</p></div><form (ngSubmit)="linkFile()"><label class="sr-only" for="existing-file">Fichier à lier</label><select id="existing-file" name="linkFileId" [(ngModel)]="linkFileId" [disabled]="busy()"><option value="">{{ attachableFiles().length ? 'Choisir dans la bibliothèque' : 'Tous les fichiers sont déjà liés' }}</option>@for (file of attachableFiles(); track file.id) { <option [value]="file.id">{{ file.filename }} · {{ file.id.slice(0, 8) }}</option> }</select><button class="button secondary" [disabled]="busy() || !linkFileId">Lier au projet</button></form></section>
+      }
+
+      <section class="panel file-panel" aria-labelledby="files-title">
+        <div class="panel-heading"><h2 id="files-title">{{ projectId() ? 'Fichiers du projet' : 'Tous les fichiers' }} <span class="count">{{ visibleFiles().length }}</span></h2><label class="search-field"><span>⌕</span><input aria-label="Rechercher un fichier" placeholder="Rechercher un nom ou un état…" [ngModel]="search()" (ngModelChange)="search.set($event)"></label></div>
+        <div class="filters" aria-label="Type de fichier">@for (item of [{id: 'all', label: 'Tous'}, {id: 'model', label: 'Modèles 3D'}, {id: 'sliced', label: 'Fichiers slicés'}, {id: 'slicer_project', label: 'Profils & projets'}, {id: 'other', label: 'Documents'}]; track item.id) { <button [class.selected]="filter() === item.id" [attr.aria-pressed]="filter() === item.id" (click)="filter.set(item.id)">{{ item.label }}</button> }</div>
+        @if (loading()) { <div class="empty-state" role="status">Chargement de la bibliothèque…</div> }
+        @else if (visibleFiles().length) {
+          <div class="table-scroll"><table><thead><tr><th>Nom du fichier</th><th>Type</th><th>État</th><th>Taille</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>
+          @for (file of visibleFiles(); track file.id) {
+            <tr><td><div class="file-name"><span class="file-icon" [class.print-file]="file.is_print_related">{{ file.extension ? file.extension.slice(1).toUpperCase() : 'FILE' }}</span><div><strong>{{ file.filename }}</strong><span>Ajouté le {{ file.created_at | date:'dd/MM/yyyy' }}</span></div></div></td><td><span class="kind-badge" [class.print-kind]="file.is_print_related">{{ kindLabel(file.kind) }}</span></td><td>@if (editingState() === file.id) {
+<form class="inline-editor" (ngSubmit)="saveState(file)"><input aria-label="État du fichier" name="stateDraft" [(ngModel)]="stateDraft" [disabled]="busy()"><div class="form-actions"><button class="text-button" [disabled]="busy()">Enregistrer</button><button type="button" class="text-button" (click)="editingState.set(null)" [disabled]="busy()">Annuler</button></div></form>
+} @else { <span class="file-state">{{ file.state || '—' }}</span><button class="text-button" (click)="startStateEdit(file)" [disabled]="busy()">Modifier l’état</button> }</td><td class="file-size">{{ formatSize(file.size_bytes) }}</td><td><div class="row-actions"><a class="icon-button download" [href]="api.downloadUrl(file.id)" [attr.aria-label]="'Télécharger ' + file.filename" title="Télécharger">↓</a>@if (projectId()) { <button class="text-button unlink" (click)="unlinkFile(file)" [disabled]="busy()" [attr.aria-label]="'Délier ' + file.filename">Délier</button> }<button class="text-button danger" (click)="deleteFile(file)" [disabled]="busy()" [attr.aria-label]="'Supprimer ' + file.filename">Supprimer</button></div></td></tr>
+          }
+          </tbody></table></div>
+        } @else {
+          <div class="empty-state"><span class="empty-icon">▱</span><h3>{{ search() || filter() !== 'all' ? 'Aucun fichier correspondant' : 'Une place pour tes prochaines créations' }}</h3><p>{{ search() || filter() !== 'all' ? 'Essaie un autre nom, un autre état ou un autre type.' : 'Importe ton premier fichier pour commencer à organiser ton atelier.' }}</p>@if (!search() && filter() === 'all') { <button class="button secondary" (click)="showImport.set(true)">Importer un fichier</button> }</div>
+        }
+      </section>
+
+      @if (projectId() && project()) {
+        <section class="notes-section" aria-labelledby="notes-title"><div class="section-heading"><h2 id="notes-title">Notes du projet</h2><span>Les détails qu’on aime retrouver.</span></div><div class="notes-layout"><form class="panel note-form" (ngSubmit)="createNote()"><label for="note-content">Ajouter une note</label><textarea id="note-content" name="noteContent" [(ngModel)]="noteContent" rows="5" placeholder="Réglages à essayer, dimensions, résultat d’un test…" [disabled]="busy()"></textarea><button class="button secondary" [disabled]="busy() || !noteContent.trim()">Ajouter la note</button></form><div class="note-list">@for (note of project()!.notes; track note.id) { <article class="note-card"><time>{{ note.created_at | date:'dd/MM/yyyy · HH:mm' }}</time>@if (editingNote() === note.id) {
+<form class="inline-editor" (ngSubmit)="saveNote(note)"><textarea aria-label="Contenu de la note" name="noteDraft" [(ngModel)]="noteDraft" rows="5" [disabled]="busy()"></textarea><div class="form-actions"><button class="text-button" [disabled]="busy() || !noteDraft.trim()">Enregistrer</button><button type="button" class="text-button" (click)="editingNote.set(null)" [disabled]="busy()">Annuler</button></div></form>
+} @else { <p>{{ note.content }}</p><div class="form-actions"><button class="text-button" (click)="startNoteEdit(note)" [disabled]="busy()">Modifier</button><button class="text-button danger" (click)="deleteNote(note)" [disabled]="busy()">Supprimer</button></div> }</article> } @empty { <div class="notes-empty">Pas encore de note.<br>Garde ici tes idées et tes observations.</div> }</div></div></section>
+      }
+      @if (projectId() && project()) {
+<section class="notes-section" aria-labelledby="todos-title"><div class="section-heading"><h2 id="todos-title">À faire</h2><span>Les prochaines étapes du projet.</span></div>
+<div class="panel todo-panel"><form class="todo-create" (ngSubmit)="createTodo()"><label class="sr-only" for="todo-content">Nouvelle tâche</label><input id="todo-content" name="todoContent" [(ngModel)]="todoContent" placeholder="Ex. Vérifier les dimensions" [disabled]="busy()"><button class="button secondary" [disabled]="busy() || !todoContent.trim()">Ajouter une tâche</button></form>
+<ul class="todo-list">@for (todo of project()!.todos; track todo.id) {
+<li class="todo-row">@if (editingTodo() === todo.id) {
+<form class="inline-editor" (ngSubmit)="updateTodo(todo)"><input aria-label="Texte de la tâche" name="todoDraft" [(ngModel)]="todoDraft" [disabled]="busy()"><div class="form-actions"><button class="text-button" [disabled]="busy() || !todoDraft.trim()">Enregistrer</button><button type="button" class="text-button" (click)="editingTodo.set(null)" [disabled]="busy()">Annuler</button></div></form>
+} @else {
+<label class="todo-label" [class.completed]="todo.completed"><input type="checkbox" [checked]="todo.completed" (change)="updateTodo(todo, !todo.completed)" [disabled]="busy()">{{ todo.content }}</label><div class="form-actions"><button class="text-button" (click)="startTodoEdit(todo)" [disabled]="busy()">Modifier</button><button class="text-button danger" (click)="deleteTodo(todo)" [disabled]="busy()">Supprimer</button></div>
+}</li>
+} @empty { <li class="notes-empty">Aucune tâche pour le moment.</li> }</ul></div></section>
+      }
+      <footer class="content-footer">Une idée, un fichier, une création.</footer>
+    </div>
+  </main>
+</div>
