@@ -16,11 +16,14 @@ export interface Project { id: string; name: string; created_at: string; }
 export interface Note { id: string; project_id: string; content: string; created_at: string; }
 export interface Todo extends Note { completed: boolean; }
 export interface ProjectDetail extends Project { files: LibraryFile[]; notes: Note[]; todos: Todo[]; }
+export interface Storage { total_bytes: number; used_bytes: number; free_bytes: number; }
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
   private base = '/api/v1';
+
+  storage() { return firstValueFrom(this.http.get<Storage>(`${this.base}/storage`)); }
 
   files() { return firstValueFrom(this.http.get<LibraryFile[]>(`${this.base}/files`)); }
   projects() { return firstValueFrom(this.http.get<Project[]>(`${this.base}/projects`)); }

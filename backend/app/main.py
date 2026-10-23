@@ -1,7 +1,8 @@
+import shutil
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -16,6 +17,12 @@ from app.library import router as library_router
 class HealthResponse(BaseModel):
     status: Literal["ok", "unavailable"]
     database: Literal["ok", "unavailable"]
+
+
+class StorageResponse(BaseModel):
+    total_bytes: int
+    used_bytes: int
+    free_bytes: int
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,6 +48,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["Content-Disposition"],
     )
+
+    @app.get("/api/v1/storage", response_model=StorageResponse, tags=["storage"])
+    def storage():
+        try:
+            usage = shutil.disk_usage(settings.files_dir)
+        except OSError:
+            raise HTTPException(
+                status_code=503, detail="Informations de stockage indisponibles."
+            ) from None
+        return StorageResponse(
+            total_bytes=usage.total, used_bytes=usage.used, free_bytes=usage.free
+        )
 
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["health"])
     def health(request: Request):

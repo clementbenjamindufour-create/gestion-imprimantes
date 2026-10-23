@@ -18,7 +18,16 @@
         <p class="sidebar-empty">Tes projets apparaîtront ici.</p>
       }
     </nav>
-    <div class="sidebar-footer"><span class="status-dot"></span> Ton espace de fabrication<span>Fichiers, projets et idées réunis.</span></div>
+    <div class="sidebar-footer">
+      <strong>Disque de stockage</strong>
+      @if (storage(); as disk) {
+        <span>{{ formatSize(disk.free_bytes) }} disponibles sur {{ formatSize(disk.total_bytes) }}</span>
+        <meter class="storage-meter" aria-label="Espace disque utilisé" [min]="0" [max]="disk.total_bytes" [value]="disk.used_bytes"></meter>
+        <span>Occupation totale du disque du serveur.</span>
+      } @else {
+        <span>{{ loading() ? 'Chargement du stockage…' : 'Espace disponible indisponible' }}</span>
+      }
+    </div>
   </aside>
 
   <main>

@@ -6,6 +6,35 @@ from app.config import Settings
 from app.main import create_app
 
 
+def test_storage_uses_files_disk(tmp_path, monkeypatch):
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+    settings = Settings(data_dir=tmp_path, _env_file=None)
+
+    def disk_usage(path):
+        assert path == settings.files_dir
+        assert path.is_dir()
+        return usage(1000, 600, 400)
+
+    monkeypatch.setattr("app.main.shutil.disk_usage", disk_usage)
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/v1/storage")
+        assert response.status_code == 200
+        assert response.json() == {
+            "total_bytes": 1000, "used_bytes": 600, "free_bytes": 400
+        }
+
+
+def test_storage_unavailable(tmp_path, monkeypatch):
+    def disk_usage(path):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr("app.main.shutil.disk_usage", disk_usage)
+    with TestClient(create_app(Settings(data_dir=tmp_path, _env_file=None))) as client:
+        assert client.get("/api/v1/storage").status_code == 503
+
+
 def test_health_and_sqlite_configuration(tmp_path):
     app = create_app(Settings(data_dir=tmp_path, _env_file=None))
     with TestClient(app) as client:

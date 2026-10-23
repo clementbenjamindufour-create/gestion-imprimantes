@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ApiService, LibraryFile, Note, Todo, Project, ProjectDetail } from './api.service';
+import { ApiService, LibraryFile, Note, Todo, Project, ProjectDetail, Storage } from './api.service';
 
 @Component({
   selector: 'app-workspace',
@@ -20,6 +20,7 @@ export class WorkspaceComponent {
   readonly project = signal<ProjectDetail | null>(null);
   readonly projectId = signal<string | null>(null);
   readonly loading = signal(true);
+  readonly storage = signal<Storage | null>(null);
   readonly busy = signal(false);
   readonly error = signal('');
   readonly notice = signal('');
@@ -77,13 +78,15 @@ export class WorkspaceComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [projects, files, project] = await Promise.all([
+      const [projects, files, project, storage] = await Promise.all([
         this.api.projects(), this.api.files(), id ? this.api.project(id) : Promise.resolve(null),
+        this.api.storage().catch(() => null),
       ]);
       if (version !== this.loadVersion) return;
       this.projects.set(projects);
       this.files.set(files);
       this.project.set(project);
+      this.storage.set(storage);
     } catch (error) {
       if (version === this.loadVersion) this.error.set(this.errorMessage(error));
     } finally {
@@ -281,6 +284,8 @@ export class WorkspaceComponent {
   }
 
   formatSize(bytes: number) {
+    if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} To`;
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} Go`;
     if (bytes < 1024) return `${bytes} o`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
