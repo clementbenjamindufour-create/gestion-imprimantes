@@ -1,14 +1,25 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, HostListener, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ApiService, LibraryFile, Note, Todo, Project, ProjectDetail, Storage } from './api.service';
+import { StlPreviewComponent } from './stl-preview.component';
+
+interface ImportItem {
+  id: number;
+  file: File;
+  status: 'pending' | 'uploading' | 'linking' | 'done' | 'upload_error' | 'link_error';
+  message: string;
+  uploadedId?: string;
+  projectId?: string | null;
+  state?: string;
+}
 
 @Component({
   selector: 'app-workspace',
-  imports: [FormsModule, RouterLink, DatePipe],
+  imports: [FormsModule, RouterLink, DatePipe, StlPreviewComponent],
   templateUrl: './workspace.component.html',
 })
 export class WorkspaceComponent {
@@ -28,7 +39,27 @@ export class WorkspaceComponent {
   readonly filter = signal('all');
   readonly showImport = signal(false);
   readonly showCreate = signal(false);
-  readonly selectedFile = signal<File | null>(null);
+  readonly imports = signal<ImportItem[]>([]);
+  readonly importing = signal(false);
+  readonly stopRequested = signal(false);
+  readonly pendingImports = computed(() => this.imports().filter(item => item.status === 'pending').length);
+  readonly failedImports = computed(() => this.imports().filter(item => item.status === 'upload_error' || item.status === 'link_error').length);
+  readonly finishedImports = computed(() => this.imports().filter(item => ['done', 'upload_error', 'link_error'].includes(item.status)).length);
+  readonly importSize = computed(() => this.imports().reduce((sum, item) => sum + item.file.size, 0));
+  private importId = 0;
+  readonly previewFile = signal<LibraryFile | null>(null);
+  readonly selectedIds = signal(new Set<string>());
+  readonly selectedFiles = computed(() => this.files().filter(file => this.selectedIds().has(file.id)));
+  readonly allVisibleSelected = computed(() => this.visibleFiles().length > 0 && this.visibleFiles().every(file => this.selectedIds().has(file.id)));
+  readonly someVisibleSelected = computed(() => !this.allVisibleSelected() && this.visibleFiles().some(file => this.selectedIds().has(file.id)));
+  readonly hiddenSelected = computed(() => {
+    const visible = new Set(this.visibleFiles().map(file => file.id));
+    return this.selectedFiles().filter(file => !visible.has(file.id)).length;
+  });
+  readonly bulkWorking = signal(false);
+  readonly bulkStatus = signal('');
+  readonly bulkErrors = signal<{ filename: string; message: string }[]>([]);
+  bulkProjectId = '';
   projectName = '';
   fileState = '';
   noteContent = '';
@@ -59,6 +90,10 @@ export class WorkspaceComponent {
   constructor() {
     this.route.paramMap.pipe(takeUntilDestroyed()).subscribe(params => {
       this.projectId.set(params.get('projectId'));
+      this.selectedIds.set(new Set());
+      this.bulkProjectId = '';
+      this.bulkErrors.set([]);
+      this.previewFile.set(null);
       this.project.set(null);
       this.search.set('');
       this.filter.set('all');
@@ -85,6 +120,7 @@ export class WorkspaceComponent {
       if (version !== this.loadVersion) return;
       this.projects.set(projects);
       this.files.set(files);
+      this.selectedIds.update(ids => new Set(files.filter(file => ids.has(file.id)).map(file => file.id)));
       this.project.set(project);
       this.storage.set(storage);
     } catch (error) {
@@ -131,31 +167,83 @@ export class WorkspaceComponent {
   }
 
   chooseFile(event: Event) {
+    if (this.busy()) return;
     const input = event.target as HTMLInputElement;
-    this.selectedFile.set(input.files?.[0] ?? null);
+    this.imports.set(Array.from(input.files ?? []).map(file => ({ id: ++this.importId, file, status: 'pending', message: 'En attente' })));
   }
 
-  async importFile(input: HTMLInputElement) {
-    const file = this.selectedFile();
-    if (!file) return;
+  removeImport(id: number) {
+    if (!this.busy()) this.imports.update(items => items.filter(item => item.id !== id));
+  }
+
+  private updateImport(id: number, patch: Partial<ImportItem>) {
+    this.imports.update(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  canLeaveImport(): boolean {
+    if (this.bulkWorking()) {
+      this.notice.set('Une action sur la sélection est en cours. Attends sa fin avant de changer de page.');
+      return false;
+    }
+    if (!this.importing()) return true;
+    this.notice.set('Import en cours : attends la fin du lot ou utilise « Arrêter après ce fichier » avant de changer de page.');
+    return false;
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  protectImport(event: BeforeUnloadEvent) {
+    if (this.importing() || this.bulkWorking()) { event.preventDefault(); event.returnValue = ''; }
+  }
+
+  async importFile(input: HTMLInputElement, retry = false) {
+    if (this.busy()) return;
+    const candidates = this.imports().filter(item => retry
+      ? item.status === 'upload_error' || item.status === 'link_error'
+      : item.status === 'pending');
+    if (!candidates.length) return;
     const projectId = this.attachImport ? this.projectId() : null;
+    // Fige le projet et l'etat du lot, meme si la route change pendant l'envoi.
+    const items = candidates.map(item => ({ ...item,
+      projectId: item.projectId === undefined ? projectId : item.projectId,
+      state: item.state === undefined ? this.fileState : item.state,
+    }));
+    for (const item of items) this.updateImport(item.id, { projectId: item.projectId, state: item.state });
     await this.mutate(async () => {
-      const uploaded = await this.api.upload(file, this.fileState);
-      // Après un import réussi, ne pas réimporter si le lien échoue.
-      this.selectedFile.set(null);
-      input.value = '';
-      this.fileState = '';
-      this.showImport.set(false);
-      let linkError = false;
-      if (projectId) {
-        try { await this.api.link(projectId, uploaded.id); }
-        catch { linkError = true; }
-      }
-      await this.reload();
-      if (linkError) {
-        this.error.set('Fichier importé dans la bibliothèque, mais non lié au projet. Utilise « Lier un fichier existant ».');
-      } else {
-        this.notice.set(projectId ? 'Fichier importé et lié au projet.' : 'Fichier importé dans la bibliothèque.');
+      this.importing.set(true);
+      this.stopRequested.set(false);
+      try {
+        for (const item of items) {
+          if (this.stopRequested()) break;
+          let uploadedId = item.uploadedId;
+          if (!uploadedId) {
+            this.updateImport(item.id, { status: 'uploading', message: 'Import en cours…' });
+            try {
+              const uploaded = await this.api.upload(item.file, item.state);
+              uploadedId = uploaded.id;
+              this.updateImport(item.id, { uploadedId });
+            } catch (error) {
+              this.updateImport(item.id, { status: 'upload_error', message: this.errorMessage(error) });
+              continue;
+            }
+          }
+          if (item.projectId) {
+            this.updateImport(item.id, { status: 'linking', message: 'Liaison au projet…' });
+            try { await this.api.link(item.projectId, uploadedId); }
+            catch {
+              this.updateImport(item.id, { status: 'link_error', message: 'Importé dans la bibliothèque, mais non lié au projet. Réessaie la liaison.' });
+              continue;
+            }
+          }
+          this.updateImport(item.id, { status: 'done', message: item.projectId ? 'Importé et lié au projet' : 'Importé dans la bibliothèque' });
+        }
+        input.value = '';
+        await this.reload();
+        const completed = this.imports().filter(item => item.status === 'done').length;
+        const summary = completed === 1 ? '1 fichier importé' : `${completed} fichiers importés`;
+        this.notice.set(`${summary} avec succès.${this.failedImports() ? ` ${this.failedImports()} en échec.` : ''}${this.pendingImports() ? ` ${this.pendingImports()} en attente.` : ''}`);
+        if (!this.pendingImports() && !this.failedImports()) this.fileState = '';
+      } finally {
+        this.importing.set(false);
       }
     });
   }
@@ -219,6 +307,77 @@ export class WorkspaceComponent {
       await this.api.deleteFile(file.id);
       await this.reload();
       this.notice.set('Fichier supprimé de la bibliothèque et des projets.');
+    });
+  }
+
+  toggleFile(id: string, checked: boolean) {
+    if (this.busy()) return;
+    this.selectedIds.update(ids => {
+      const next = new Set(ids);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  clearSelection() { if (!this.busy()) this.selectedIds.set(new Set()); }
+
+  toggleVisible(checked: boolean) {
+    if (this.busy()) return;
+    this.selectedIds.update(ids => {
+      const next = new Set(ids);
+      for (const file of this.visibleFiles()) {
+        if (checked) next.add(file.id); else next.delete(file.id);
+      }
+      return next;
+    });
+  }
+
+  async downloadSelected() {
+    const files = this.selectedFiles();
+    if (!files.length || this.busy()) return;
+    await this.mutate(async () => {
+      this.bulkWorking.set(true);
+      this.bulkStatus.set('Préparation du téléchargement…');
+      this.bulkErrors.set([]);
+      try {
+        const blob = files.length > 1 ? await this.api.archive(files.map(file => file.id)) : null;
+        const url = blob ? URL.createObjectURL(blob) : this.api.downloadUrl(files[0].id);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = blob ? 'selection.zip' : files[0].filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        if (blob) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        this.notice.set('Téléchargement lancé.');
+      } finally { this.bulkWorking.set(false); this.bulkStatus.set(''); }
+    });
+  }
+
+  async actOnSelection(action: 'delete' | 'link') {
+    const files = this.selectedFiles();
+    const projectId = this.bulkProjectId;
+    if (!files.length || this.busy() || (action === 'link' && !projectId)) return;
+    if (action === 'delete' && !window.confirm(`Supprimer définitivement ${files.length} fichier(s) de la bibliothèque et de tous leurs projets ?\n\n${files.slice(0, 5).map(file => file.filename).join('\n')}${files.length > 5 ? '\n…' : ''}`)) return;
+    await this.mutate(async () => {
+      this.bulkWorking.set(true);
+      this.bulkErrors.set([]);
+      let completed = 0;
+      try {
+        for (const [index, file] of files.entries()) {
+          this.bulkStatus.set(`${action === 'delete' ? 'Suppression' : 'Liaison'} ${index + 1} / ${files.length} : ${file.filename}`);
+          try {
+            if (action === 'delete') await this.api.deleteFile(file.id);
+            else await this.api.link(projectId, file.id);
+            completed++;
+            this.selectedIds.update(ids => { const next = new Set(ids); next.delete(file.id); return next; });
+          } catch (error) {
+            this.bulkErrors.update(errors => [...errors, { filename: file.filename, message: this.errorMessage(error) }]);
+          }
+        }
+        await this.reload();
+        this.notice.set(`${completed} fichier(s) ${action === 'delete' ? 'supprimé(s)' : 'lié(s) au projet'}.${this.bulkErrors().length ? ' Les fichiers en échec restent sélectionnés.' : ''}`);
+      } finally { this.bulkWorking.set(false); this.bulkStatus.set(''); }
     });
   }
 

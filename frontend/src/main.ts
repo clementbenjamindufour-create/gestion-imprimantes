@@ -15,8 +15,8 @@ bootstrapApplication(AppComponent, {
   providers: [
     provideHttpClient(),
     provideRouter([
-      { path: 'library', component: WorkspaceComponent },
-      { path: 'projects/:projectId', component: WorkspaceComponent },
+      { path: 'library', component: WorkspaceComponent, canDeactivate: [(component: WorkspaceComponent) => component.canLeaveImport()] },
+      { path: 'projects/:projectId', component: WorkspaceComponent, canDeactivate: [(component: WorkspaceComponent) => component.canLeaveImport()] },
       { path: '', redirectTo: 'library', pathMatch: 'full' },
       { path: '**', redirectTo: 'library' },
     ]),

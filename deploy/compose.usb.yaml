@@ -1,0 +1,8 @@
+services:
+  backend:
+    environment:
+      PRINTERS_STORAGE_ID: ${APP_STORAGE_UUID:?Identite USB requise}
+    entrypoint: ["sh", "/storage-entrypoint.sh"]
+    volumes:
+      - ${APP_DATA_DIR:?Dossier USB requis}:/data
+      - ./storage-entrypoint.sh:/storage-entrypoint.sh:ro

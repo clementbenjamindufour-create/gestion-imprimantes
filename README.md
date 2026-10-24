@@ -62,7 +62,8 @@ Un disque USB pourra servir à ce stockage lorsque le Dell sera configuré.
 
 Le script `deploy.ps1` utilise `server.local` par défaut. Prérequis : OpenSSH
 et une machine Podman démarrée sur le PC ; SSH, Podman et un fournisseur Compose
-sur le serveur Linux x86_64. Le compte SSH doit être celui qui possède
+ainsi que `flock` (util-linux) et `timeout` (coreutils) sur le serveur Linux x86_64.
+Le compte SSH doit être celui qui possède
 les conteneurs et le volume Podman existants (déploiement sans `sudo`).
 
 Première connexion (compte `user` sur `server.local` par défaut) :
@@ -105,7 +106,7 @@ sauvegarde tout le volume `gestion-imprimantes_library-data`, puis lance la
 nouvelle version et vérifie `/api/v1/health` via Nginx depuis le conteneur frontend,
 sans nécessiter `curl` sur le serveur. Le volume existant est conservé.
 Les migrations sont exécutées au démarrage du backend. L’application est ensuite
-accessible sur `http://server.local:8080` et écoute sur toutes les interfaces du
+accessible sur `http://server.local:8081` (port par défaut du script) et écoute sur toutes les interfaces du
 serveur : utiliser le réseau local de confiance, l’application n’ayant pas encore
 d’authentification.
 
@@ -114,7 +115,22 @@ Les versions sont dans `~/gestion-imprimantes/releases/`, les sauvegardes dans
 déploiement validé. Les archives locales restent dans `.deploy/releases/`.
 Aucun nettoyage automatique ne supprime les sauvegardes ou les anciennes images :
 surveiller leur taille. Ne pas lancer simultanément une mise à jour manuelle et
-ce script. Un verrou bloque les déploiements concurrents par ce script.
+ce script. Un verrou système `flock` bloque les déploiements concurrents et se
+libère automatiquement à la fin des processus, même après une interruption.
+Le démarrage Compose est limité à trois minutes.
+
+Pour reprendre une version dont les deux archives ont déjà été transférées,
+sans reconstruire ni retransférer les images :
+
+```powershell
+.\deploy.ps1 -ResumeVersion 20261023T182942653Z
+```
+
+Le port 8081 évite le conteneur nginx existant sur 8080. Utiliser `-AppPort` pour
+choisir un autre port. La reprise conserve les anciennes
+sauvegardes et en crée une nouvelle. Avec l’ancien script, vérifier que les
+processus distants de déploiement sont terminés avant de retirer le dossier
+vide `~/gestion-imprimantes/.deployment-lock` avec `rmdir`.
 
 En cas d’échec après le démarrage, consulter les logs depuis le dossier de la
 version concernée : `podman compose --env-file .env -f compose.yaml logs`.
@@ -124,7 +140,73 @@ La sauvegarde TAR contient le dossier `data/`, avec SQLite et les fichiers ;
 une restauration s’effectue services arrêtés dans le même volume Podman, en
 conservant les propriétaires des fichiers. Les archives ne sont pas chiffrées.
 
+## Stockage USB du serveur
+
+Sur ce serveur, le stockage de l'application est sur `/srv/atelier-data/data`,
+sur la clé ext4 `atelier-data` d'UUID
+`d875cb54-d3dd-40d6-8729-b41c5aa03a52`. Son montage permanent est défini dans
+`/etc/fstab`. Le fichier `~/gestion-imprimantes/storage.env` conserve le chemin
+et l'UUID attendus indépendamment des versions déployées.
+
+Le déploiement charge automatiquement `compose.usb.yaml` et vérifie que le
+dossier se trouve sur le bon système de fichiers. Les sauvegardes portent alors
+sur les données USB et restent sur le disque interne, dans `backups/`.
+Le backend vérifie aussi le fichier `.atelier-storage-id` avant chaque démarrage :
+si la clé est absente ou le dossier incorrect, il refuse de créer une base vide.
+Ne pas lancer le fichier Compose de base seul sur ce serveur : il désignerait
+l'ancien volume interne. Pour consulter les logs avec la configuration active :
+
+```bash
+deploy_root="$HOME/gestion-imprimantes"
+cd "$(cat "$deploy_root/current-release")"
+. ./storage-config.sh
+compose logs --tail 80
+```
+
+La migration est réalisée par `deploy/migrate-usb.sh` après montage de la clé
+et création d'un dossier cible vide appartenant au compte SSH. Ce script
+verrouille les déploiements, arrête les services, sauvegarde l'ancien volume,
+copie les données avec leurs permissions via `podman unshare`, compare les fichiers
+et vérifie l'intégrité SQLite. En cas d'erreur, il tente de relancer l'ancienne
+configuration. L'ancien volume `gestion-imprimantes_library-data` et les
+sauvegardes `avant-usb-*.tar` sont conservés ; après la migration, cet ancien
+volume ne reçoit plus les nouvelles données. Ne pas débrancher la clé en service.
+
 ## Développement
+
+Dans « Tous les fichiers », les cases à cocher pilotent le téléchargement,
+la suppression et la liaison d'une sélection à un projet. La case d'en-tête
+sélectionne les fichiers visibles après filtrage ; les sélections masquées
+restent cochées et leur nombre est affiché. Le téléchargement fournit le fichier
+original pour une sélection unique, ou `selection.zip` pour plusieurs fichiers.
+L'API `POST /api/v1/files/archive` reçoit `{"file_ids": ["uuid", "uuid"]}` et
+produit un ZIP sans compression, au fil de la lecture, sans fichier temporaire.
+Les noms en doublon sont renommés dans l'archive. La suppression est définitive
+dans toute la bibliothèque et ses projets, après confirmation unique. Les actions
+de suppression et de liaison continuent après une erreur ; seuls les échecs
+restent sélectionnés pour une nouvelle tentative.
+
+L'import accepte plusieurs fichiers sélectionnés avec Ctrl ou Maj. Les envois
+sont séquentiels pour limiter la charge sur le serveur ; l'état et la liaison
+éventuelle au projet s'appliquent au lot. La liste affiche le résultat de chaque
+fichier, avec arrêt après le fichier en cours, poursuite des fichiers restants
+et reprise des échecs. Une erreur de liaison au projet est réessayée sans
+réimporter le fichier déjà stocké. Garder la page ouverte pendant les envois ;
+la file d'import n'est pas conservée après rechargement de la page. La navigation
+interne est bloquée pendant le lot et le navigateur avertit avant fermeture
+ou rechargement pendant un envoi.
+
+La bibliothèque et les projets proposent un bouton « Aperçu 3D » pour les STL
+ASCII et binaires. Le visualiseur est chargé au clic et utilise WebGL 2 dans le
+navigateur, avec rotation, zoom, déplacement et recentrage. Le serveur fournit
+le fichier existant sans conversion. Les dimensions restent en unités STL
+(le format ne spécifie pas leur unité). Au-delà de 10 Mo, un avertissement
+demande de lancer le chargement ; l'aperçu est limité à 50 Mo et un million
+de triangles. Les fichiers restent téléchargeables dans tous les cas.
+
+Tests du visualiseur : `npm run test:e2e -- e2e/stl-preview.spec.ts`, avec
+`E2E_BASE_URL` pointant vers une instance frontend ; ces tests simulent l'API
+et ne modifient pas les données du serveur.
 
 La barre latérale affiche l’espace disponible et la capacité totale du disque
 contenant les fichiers, via `GET /api/v1/storage`. Ces informations sont mises

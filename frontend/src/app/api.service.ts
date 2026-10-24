@@ -49,6 +49,9 @@ export class ApiService {
     return firstValueFrom(this.http.post<Note>(`${this.base}/projects/${projectId}/notes`, { content }));
   }
   downloadUrl(id: string) { return `${this.base}/files/${id}/download`; }
+  archive(ids: string[]) {
+    return firstValueFrom(this.http.post(`${this.base}/files/archive`, { file_ids: ids }, { responseType: 'blob' }));
+  }
   deleteFile(id: string) {
     return firstValueFrom(this.http.delete<void>(`${this.base}/files/${id}`));
   }

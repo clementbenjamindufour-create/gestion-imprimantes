@@ -9,6 +9,13 @@ services:
     volumes:
       - library-data:/data
     restart: unless-stopped
+    healthcheck:
+      test: >-
+        python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     mem_limit: 512m
     security_opt:
       - no-new-privileges:true
@@ -16,11 +23,16 @@ services:
     image: localhost/atelier-frontend:${ATELIER_VERSION:?Version requise}
     pull_policy: never
     ports:
-      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8081}:8080"
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: wget -q -O /dev/null http://127.0.0.1:8080/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 6
     mem_limit: 128m
     security_opt:
       - no-new-privileges:true

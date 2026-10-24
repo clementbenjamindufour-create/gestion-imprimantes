@@ -3,26 +3,32 @@ set -eu
 cd "$(dirname "$0")"
 release_dir=$(pwd)
 deploy_root=$(cd ../.. && pwd)
-lock="$deploy_root/.deployment-lock"
-mkdir "$lock" 2>/dev/null || { echo 'Un deploiement est deja en cours.' >&2; exit 1; }
-trap 'rmdir "$lock"' EXIT
+command -v flock >/dev/null || { echo 'flock (util-linux) est requis sur le serveur.' >&2; exit 1; }
+# Le noyau libere ce verrou meme apres une interruption brutale.
+# Ne jamais supprimer ce fichier pendant qu'un deploiement est actif.
+exec 9>"$deploy_root/.deployment.lock"
+flock -n 9 || { echo 'Un deploiement est deja en cours.' >&2; exit 1; }
+if [ -d "$deploy_root/.deployment-lock" ]; then
+    echo 'Ancien verrou present : verifier les anciens processus avant de retirer le dossier .deployment-lock.' >&2
+    exit 1
+fi
+. ./storage-config.sh
 podman compose version
 podman load --input backend.tar
 podman load --input frontend.tar
-compose() { podman compose --env-file .env -f compose.yaml "$@"; }
 compose config > /dev/null
 podman image exists "localhost/atelier-backend:$1"
 podman image exists "localhost/atelier-frontend:$1"
 mkdir -p "$deploy_root/backups"
 
 # Stoppe aussi une installation issue du compose de developpement (meme projet).
-if podman volume exists gestion-imprimantes_library-data; then
+if [ "$data_source" != gestion-imprimantes_library-data ] || podman volume exists gestion-imprimantes_library-data; then
     compose stop
-    backup="$deploy_root/backups/$(basename "$release_dir").tar"
+    backup=$(mktemp "$deploy_root/backups/$(basename "$release_dir")-XXXXXXXX.tar")
     echo "Sauvegarde des donnees : $backup"
     # L'image chargee contient Python ; aucun telechargement sur le serveur.
     if ! podman run --rm --network none --pull never --entrypoint python \
-        --volume gestion-imprimantes_library-data:/data:ro \
+        --volume "$data_source:/data:ro" \
         "localhost/atelier-backend:$1" -c \
         'import sys, tarfile; t = tarfile.open(fileobj=sys.stdout.buffer, mode="w|"); t.add("/data", arcname="data"); t.close()' > "$backup"; then
         echo 'Sauvegarde echouee, redemarrage de la version existante.' >&2
@@ -31,7 +37,7 @@ if podman volume exists gestion-imprimantes_library-data; then
     fi
 fi
 
-if ! compose up -d --no-build; then
+if ! timeout --kill-after=10 180 podman compose --env-file .env $compose_files up -d --no-build; then
     echo "Deploiement echoue. Consulter les logs et la sauvegarde dans $deploy_root/backups." >&2
     exit 1
 fi

@@ -1,5 +1,7 @@
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+from zipfile import ZipFile
 
 import pytest
 from alembic import command
@@ -26,6 +28,48 @@ def library(tmp_path, monkeypatch):
 def upload(client, filename="piece.STL", content=b"solid test", state=None):
     data = {} if state is None else {"state": state}
     return client.post("/api/v1/files", files={"file": (filename, content)}, data=data)
+
+
+def test_archive_preserves_content_and_handles_duplicate_names(library):
+    client, _, _ = library
+    first = upload(client, "pièce.stl", b"abc" * 100000).json()
+    second = upload(client, "pièce.stl", b"second").json()
+    empty = upload(client, "vide.txt", b"").json()
+    response = client.post(
+        "/api/v1/files/archive",
+        json={"file_ids": [first["id"], second["id"], first["id"], empty["id"]]},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "selection.zip" in response.headers["content-disposition"]
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == ["pièce.stl", "pièce_2.stl", "vide.txt"]
+        assert archive.read("pièce.stl") == b"abc" * 100000
+        assert archive.read("pièce_2.stl") == b"second"
+        assert archive.read("vide.txt") == b""
+        assert archive.testzip() is None
+
+
+def test_archive_missing_file_fails_before_sending_zip(library):
+    client, _, data_dir = library
+    resource = upload(client).json()
+    (data_dir / "files" / resource["id"]).unlink()
+    response = client.post("/api/v1/files/archive", json={"file_ids": [resource["id"]]})
+    assert response.status_code == 404
+    assert (
+        client.post(
+            "/api/v1/files/archive", json={"file_ids": [str(uuid4())]}
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.parametrize("ids", [[], ["incorrect"], [str(uuid4())] * 10001])
+def test_archive_validates_selection(library, ids):
+    client, _, _ = library
+    assert (
+        client.post("/api/v1/files/archive", json={"file_ids": ids}).status_code == 422
+    )
 
 
 @pytest.mark.parametrize(

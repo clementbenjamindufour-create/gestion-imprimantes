@@ -1,6 +1,8 @@
+from collections import deque
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
+from zipfile import ZIP_STORED, ZipFile
 
 from fastapi import (
     APIRouter,
@@ -13,6 +15,8 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse as DownloadResponse
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
@@ -275,6 +279,75 @@ def download_file(file_id: UUID, request: Request, session: DatabaseSession):
         raise HTTPException(status_code=404, detail="Fichier stocké introuvable")
     return DownloadResponse(
         path, filename=resource.filename, media_type="application/octet-stream"
+    )
+
+
+class ArchiveRequest(BaseModel):
+    file_ids: list[UUID] = Field(min_length=1, max_length=10000)
+
+
+class ArchiveBuffer:
+    """Sortie ZIP non seekable, videe apres chaque morceau de fichier."""
+
+    def __init__(self):
+        self.chunks = deque()
+        self.position = 0
+
+    def write(self, data):
+        self.position += len(data)
+        if data:
+            self.chunks.append(data)
+        return len(data)
+
+    def tell(self):
+        return self.position
+
+    def flush(self):
+        pass
+
+    def drain(self):
+        while self.chunks:
+            yield self.chunks.popleft()
+
+
+@router.post("/files/archive", response_class=StreamingResponse)
+def download_archive(
+    payload: ArchiveRequest, request: Request, session: DatabaseSession
+):
+    entries = []
+    names = set()
+    for file_id in dict.fromkeys(payload.file_ids):
+        resource = require_resource(session, LibraryFile, file_id)
+        path = request.app.state.settings.files_dir / resource.id
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Fichier stocké introuvable")
+        base = Path(resource.filename.replace("\\", "/")).name
+        if base in {"", ".", ".."}:
+            base = resource.id
+        name, suffix = base, 2
+        while name.casefold() in names:
+            name = f"{Path(base).stem}_{suffix}{Path(base).suffix}"
+            suffix += 1
+        names.add(name.casefold())
+        entries.append((path, name))
+
+    def stream():
+        output = ArchiveBuffer()
+        # Sans compression : faible charge CPU et aucun fichier temporaire.
+        with ZipFile(output, "w", compression=ZIP_STORED, allowZip64=True) as archive:
+            for path, name in entries:
+                with path.open("rb") as source:
+                    with archive.open(name, "w", force_zip64=True) as target:
+                        while chunk := source.read(64 * 1024):
+                            target.write(chunk)
+                            yield from output.drain()
+                    yield from output.drain()
+        yield from output.drain()
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="selection.zip"'},
     )
 
 

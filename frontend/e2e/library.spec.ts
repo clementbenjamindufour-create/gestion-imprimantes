@@ -9,7 +9,7 @@ test('projet, import, téléchargement, note et déliaison persistante', async (
   await page.getByLabel('Nom du projet').fill(name);
   await page.getByRole('button', { name: 'Créer', exact: true }).click();
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Importer un fichier', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Importer des fichiers', exact: true }).first().click();
   await page.locator('#upload-file').setInputFiles({
     name: filename, mimeType: 'application/octet-stream', buffer: Buffer.from('solid test\nendsolid'),
   });
@@ -57,7 +57,7 @@ test('navigation et formulaires sur téléphone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/library');
   await expect(page.getByRole('heading', { name: 'Ta bibliothèque de fabrication' })).toBeVisible();
-  await page.getByRole('button', { name: 'Importer un fichier', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Importer des fichiers', exact: true }).first().click();
   await expect(page.locator('#upload-file')).toBeVisible();
   await page.screenshot({ path: 'test-results/library-mobile.png', fullPage: true });
   const layout = await page.evaluate(() => ({
