@@ -17,6 +17,8 @@ interface ImportItem {
   state?: string;
 }
 
+type FileSortColumn = 'filename' | 'kind' | 'state' | 'size_bytes';
+
 @Component({
   selector: 'app-workspace',
   imports: [FormsModule, RouterLink, DatePipe, StlPreviewComponent],
@@ -37,6 +39,12 @@ export class WorkspaceComponent {
   readonly notice = signal('');
   readonly search = signal('');
   readonly filter = signal('all');
+  readonly sort = signal<{ column: FileSortColumn; direction: 'asc' | 'desc' }>({ column: 'filename', direction: 'asc' });
+  readonly sortColumns = [
+    { key: 'filename', label: 'Nom du fichier' }, { key: 'kind', label: 'Type' },
+    { key: 'state', label: 'État' }, { key: 'size_bytes', label: 'Taille' },
+  ] as const;
+  private readonly fileCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
   readonly showImport = signal(false);
   readonly showCreate = signal(false);
   readonly imports = signal<ImportItem[]>([]);
@@ -78,9 +86,18 @@ export class WorkspaceComponent {
   readonly scopedFiles = computed(() => this.projectId() ? (this.project()?.files ?? []) : this.files());
   readonly visibleFiles = computed(() => {
     const search = this.search().trim().toLocaleLowerCase();
+    const { column, direction } = this.sort();
     return this.scopedFiles().filter(file =>
       (!search || `${file.filename} ${file.state ?? ''}`.toLocaleLowerCase().includes(search)) &&
-      (this.filter() === 'all' || file.kind === this.filter()));
+      (this.filter() === 'all' || file.kind === this.filter()))
+      .sort((a, b) => {
+        const value = (file: LibraryFile) => column === 'kind' ? this.kindLabel(file.kind) : (file[column] ?? '');
+        const comparison = column === 'size_bytes'
+          ? a.size_bytes - b.size_bytes
+          : this.fileCollator.compare(String(value(a)), String(value(b)));
+        return (direction === 'asc' ? comparison : -comparison) ||
+          this.fileCollator.compare(a.filename, b.filename) || a.id.localeCompare(b.id);
+      });
   });
   readonly attachableFiles = computed(() => {
     const linked = new Set(this.project()?.files.map(file => file.id) ?? []);
@@ -98,6 +115,7 @@ export class WorkspaceComponent {
       this.project.set(null);
       this.search.set('');
       this.filter.set('all');
+      this.sort.set({ column: 'filename', direction: 'asc' });
       this.linkFileId = '';
       this.noteContent = '';
       this.todoContent = '';
@@ -319,6 +337,10 @@ export class WorkspaceComponent {
       if (checked) next.add(id); else next.delete(id);
       return next;
     });
+  }
+
+  changeSort(column: FileSortColumn) {
+    this.sort.update(current => ({ column, direction: current.column === column && current.direction === 'asc' ? 'desc' : 'asc' }));
   }
 
 

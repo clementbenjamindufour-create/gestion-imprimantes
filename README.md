@@ -174,6 +174,12 @@ volume ne reçoit plus les nouvelles données. Ne pas débrancher la clé en ser
 
 ## Développement
 
+Les tableaux de la bibliothèque et des projets sont triés par nom croissant
+par défaut (ordre naturel français, avec prise en compte des nombres). Les
+en-têtes Nom, Type, État et Taille permettent d'alterner entre ordre croissant
+et décroissant. Le tri s'applique après les filtres, conserve la sélection et
+reste actif après actualisation ; changer de page rétablit le tri par nom.
+
 Les listes de fichiers d'un projet proposent les mêmes cases de sélection et
 actions groupées que la bibliothèque. La sélection reste limitée aux fichiers
 du projet, y compris lors d'un filtrage. « Délier la sélection du projet » retire
