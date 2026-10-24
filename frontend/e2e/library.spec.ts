@@ -19,7 +19,8 @@ test('projet, import, téléchargement, note et déliaison persistante', async (
   await expect(row).toContainText('Modèle 3D');
   await expect(row).toContainText('À slicer / supports à vérifier');
   const downloadPromise = page.waitForEvent('download');
-  await row.getByRole('link', { name: `Télécharger ${filename}` }).click();
+  await row.getByRole('checkbox', { name: `Sélectionner ${filename}`, exact: true }).check();
+  await page.getByRole('button', { name: 'Télécharger la sélection' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(filename);
   expect(await download.failure()).toBeNull();
@@ -30,7 +31,8 @@ test('projet, import, téléchargement, note et déliaison persistante', async (
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   await expect(row).toBeVisible();
   await page.screenshot({ path: 'test-results/project-desktop.png', fullPage: true });
-  await row.getByRole('button', { name: `Délier ${filename}` }).click();
+  await row.getByRole('checkbox', { name: `Sélectionner ${filename}`, exact: true }).check();
+  await page.getByRole('button', { name: 'Délier la sélection du projet' }).click();
   await expect(row).toHaveCount(0);
   const select = page.getByLabel('Fichier à lier');
   const fileId = await select.locator('option').filter({ hasText: filename }).getAttribute('value');

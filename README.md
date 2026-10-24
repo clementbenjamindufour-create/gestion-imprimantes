@@ -174,6 +174,14 @@ volume ne reçoit plus les nouvelles données. Ne pas débrancher la clé en ser
 
 ## Développement
 
+Les listes de fichiers d'un projet proposent les mêmes cases de sélection et
+actions groupées que la bibliothèque. La sélection reste limitée aux fichiers
+du projet, y compris lors d'un filtrage. « Délier la sélection du projet » retire
+uniquement les associations au projet courant et conserve les fichiers dans
+la bibliothèque et les autres projets. « Supprimer la sélection » les supprime
+définitivement partout, après confirmation. La liaison vers un autre projet
+conserve l'association au projet d'origine.
+
 Dans « Tous les fichiers », les cases à cocher pilotent le téléchargement,
 la suppression et la liaison d'une sélection à un projet. La case d'en-tête
 sélectionne les fichiers visibles après filtrage ; les sélections masquées

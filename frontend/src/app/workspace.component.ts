@@ -49,7 +49,8 @@ export class WorkspaceComponent {
   private importId = 0;
   readonly previewFile = signal<LibraryFile | null>(null);
   readonly selectedIds = signal(new Set<string>());
-  readonly selectedFiles = computed(() => this.files().filter(file => this.selectedIds().has(file.id)));
+  readonly selectedFiles = computed(() => this.scopedFiles().filter(file => this.selectedIds().has(file.id)));
+  readonly destinationProjects = computed(() => this.projects().filter(project => project.id !== this.projectId()));
   readonly allVisibleSelected = computed(() => this.visibleFiles().length > 0 && this.visibleFiles().every(file => this.selectedIds().has(file.id)));
   readonly someVisibleSelected = computed(() => !this.allVisibleSelected() && this.visibleFiles().some(file => this.selectedIds().has(file.id)));
   readonly hiddenSelected = computed(() => {
@@ -120,7 +121,8 @@ export class WorkspaceComponent {
       if (version !== this.loadVersion) return;
       this.projects.set(projects);
       this.files.set(files);
-      this.selectedIds.update(ids => new Set(files.filter(file => ids.has(file.id)).map(file => file.id)));
+      const selectable = id ? (project?.files ?? []) : files;
+      this.selectedIds.update(ids => new Set(selectable.filter(file => ids.has(file.id)).map(file => file.id)));
       this.project.set(project);
       this.storage.set(storage);
     } catch (error) {
@@ -319,7 +321,6 @@ export class WorkspaceComponent {
     });
   }
 
-  clearSelection() { if (!this.busy()) this.selectedIds.set(new Set()); }
 
   toggleVisible(checked: boolean) {
     if (this.busy()) return;
@@ -354,10 +355,11 @@ export class WorkspaceComponent {
     });
   }
 
-  async actOnSelection(action: 'delete' | 'link') {
+  async actOnSelection(action: 'delete' | 'link' | 'unlink') {
     const files = this.selectedFiles();
     const projectId = this.bulkProjectId;
-    if (!files.length || this.busy() || (action === 'link' && !projectId)) return;
+    const sourceProjectId = this.projectId();
+    if (!files.length || this.busy() || (action === 'link' && !projectId) || (action === 'unlink' && !sourceProjectId)) return;
     if (action === 'delete' && !window.confirm(`Supprimer définitivement ${files.length} fichier(s) de la bibliothèque et de tous leurs projets ?\n\n${files.slice(0, 5).map(file => file.filename).join('\n')}${files.length > 5 ? '\n…' : ''}`)) return;
     await this.mutate(async () => {
       this.bulkWorking.set(true);
@@ -365,9 +367,10 @@ export class WorkspaceComponent {
       let completed = 0;
       try {
         for (const [index, file] of files.entries()) {
-          this.bulkStatus.set(`${action === 'delete' ? 'Suppression' : 'Liaison'} ${index + 1} / ${files.length} : ${file.filename}`);
+          this.bulkStatus.set(`${action === 'delete' ? 'Suppression' : action === 'unlink' ? 'Déliaison' : 'Liaison'} ${index + 1} / ${files.length} : ${file.filename}`);
           try {
             if (action === 'delete') await this.api.deleteFile(file.id);
+            else if (action === 'unlink') await this.api.unlink(sourceProjectId!, file.id);
             else await this.api.link(projectId, file.id);
             completed++;
             this.selectedIds.update(ids => { const next = new Set(ids); next.delete(file.id); return next; });
@@ -376,7 +379,7 @@ export class WorkspaceComponent {
           }
         }
         await this.reload();
-        this.notice.set(`${completed} fichier(s) ${action === 'delete' ? 'supprimé(s)' : 'lié(s) au projet'}.${this.bulkErrors().length ? ' Les fichiers en échec restent sélectionnés.' : ''}`);
+        this.notice.set(`${completed} fichier(s) ${action === 'delete' ? 'supprimé(s)' : action === 'unlink' ? 'délié(s) du projet, conservé(s) dans la bibliothèque' : 'lié(s) au projet'}.${this.bulkErrors().length ? ' Les fichiers en échec restent sélectionnés.' : ''}`);
       } finally { this.bulkWorking.set(false); this.bulkStatus.set(''); }
     });
   }
