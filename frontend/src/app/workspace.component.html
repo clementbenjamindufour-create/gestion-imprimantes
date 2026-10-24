@@ -46,7 +46,7 @@
           <div class="panel-heading"><h2 id="import-title">Ajouter à la bibliothèque</h2><button class="text-button" (click)="showImport.set(false)" [disabled]="busy()">Fermer</button></div>
           <form (ngSubmit)="importFile(fileInput)">
             <label class="upload-area" for="upload-file"><span class="upload-icon">↑</span><strong>{{ imports().length ? imports().length + (imports().length === 1 ? ' fichier sélectionné · ' : ' fichiers sélectionnés · ') + formatSize(importSize()) : 'Choisir des fichiers' }}</strong><span>Sélectionne plusieurs fichiers avec Ctrl ou Maj. Tous les formats sont acceptés.</span><input #fileInput id="upload-file" type="file" multiple (change)="chooseFile($event)" [disabled]="busy()"></label>
-            <div class="import-options"><div class="field"><label for="file-state">État <span class="optional">facultatif</span></label><input id="file-state" name="fileState" [(ngModel)]="fileState" placeholder="Ex. À slicer, supports à vérifier…" [disabled]="busy()"></div>
+            <div class="import-options"><div class="field"><label for="file-state">État <span class="optional">facultatif</span></label><input id="file-state" name="fileState" list="known-file-states" [(ngModel)]="fileState" placeholder="Ex. À slicer, supports à vérifier…" [disabled]="busy()"></div>
             @if (projectId()) { <label class="checkbox-label"><input type="checkbox" name="attachImport" [(ngModel)]="attachImport" [disabled]="busy()"> Lier à ce projet</label> }
             <button class="button" [disabled]="busy() || !pendingImports()">{{ importing() ? 'Import en cours…' : (pendingImports() > 1 ? 'Importer les ' + pendingImports() + ' fichiers' : 'Importer') }}</button></div>
           </form>
@@ -99,7 +99,7 @@
           <div class="table-scroll"><table><thead><tr><th class="selection-cell"><input #allCheckbox type="checkbox" aria-label="Sélectionner tous les fichiers visibles" [checked]="allVisibleSelected()" [indeterminate]="someVisibleSelected()" [disabled]="busy()" (change)="toggleVisible(allCheckbox.checked)"></th>@for (column of sortColumns; track column.key) { <th scope="col" [attr.aria-sort]="sort().column === column.key ? (sort().direction === 'asc' ? 'ascending' : 'descending') : 'none'"><button class="table-sort" (click)="changeSort(column.key)" [attr.aria-label]="'Trier par ' + column.label + (sort().column === column.key && sort().direction === 'asc' ? ' (décroissant)' : ' (croissant)')">{{ column.label }} <span aria-hidden="true">{{ sort().column === column.key ? (sort().direction === 'asc' ? '↑' : '↓') : '↕' }}</span></button></th> }<th><span class="sr-only">Actions</span></th></tr></thead><tbody>
           @for (file of visibleFiles(); track file.id) {
             <tr [class.file-selected]="selectedIds().has(file.id)"><td class="selection-cell"><input #fileCheckbox type="checkbox" [attr.aria-label]="'Sélectionner ' + file.filename" [checked]="selectedIds().has(file.id)" [disabled]="busy()" (change)="toggleFile(file.id, fileCheckbox.checked)"></td><td><div class="file-name"><span class="file-icon" [class.print-file]="file.is_print_related">{{ file.extension ? file.extension.slice(1).toUpperCase() : 'FILE' }}</span><div><strong>{{ file.filename }}</strong><span>Ajouté le {{ file.created_at | date:'dd/MM/yyyy' }}</span></div></div></td><td><span class="kind-badge" [class.print-kind]="file.is_print_related">{{ kindLabel(file.kind) }}</span></td><td>@if (editingState() === file.id) {
-<form class="inline-editor" (ngSubmit)="saveState(file)"><input aria-label="État du fichier" name="stateDraft" [(ngModel)]="stateDraft" [disabled]="busy()"><div class="form-actions"><button class="text-button" [disabled]="busy()">Enregistrer</button><button type="button" class="text-button" (click)="editingState.set(null)" [disabled]="busy()">Annuler</button></div></form>
+<form class="inline-editor" (ngSubmit)="saveState(file)"><input aria-label="État du fichier" name="stateDraft" list="known-file-states" [(ngModel)]="stateDraft" [disabled]="busy()"><div class="form-actions"><button class="text-button" [disabled]="busy()">Enregistrer</button><button type="button" class="text-button" (click)="editingState.set(null)" [disabled]="busy()">Annuler</button></div></form>
 } @else { <span class="file-state">{{ file.state || '—' }}</span><button class="text-button" (click)="startStateEdit(file)" [disabled]="busy()">Modifier l’état</button> }</td><td class="file-size">{{ formatSize(file.size_bytes) }}</td><td><div class="row-actions">@if (file.extension.toLowerCase() === '.stl') { <button class="text-button" (click)="previewFile.set(file)" [attr.aria-label]="'Aperçu 3D de ' + file.filename">Aperçu 3D</button> }</div></td></tr>
           }
           </tbody></table></div>
@@ -133,3 +133,7 @@
     <app-stl-preview [file]="file" (closed)="previewFile.set(null)" />
   }
 }
+
+<datalist id="known-file-states">
+  @for (state of knownStates(); track state) { <option [value]="state"></option> }
+</datalist>

@@ -30,6 +30,9 @@ export class WorkspaceComponent {
   private router = inject(Router);
   readonly projects = signal<Project[]>([]);
   readonly files = signal<LibraryFile[]>([]);
+  readonly knownStates = computed(() => [...new Set(this.files()
+    .map(file => file.state?.trim() ?? '').filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' })));
   readonly project = signal<ProjectDetail | null>(null);
   readonly projectId = signal<string | null>(null);
   readonly loading = signal(true);

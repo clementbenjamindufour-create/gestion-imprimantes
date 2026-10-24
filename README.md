@@ -174,6 +174,10 @@ volume ne reçoit plus les nouvelles données. Ne pas débrancher la clé en ser
 
 ## Développement
 
+Le champ État de l'import et de la modification d'un fichier propose les états
+déjà présents dans toute la bibliothèque, sans doublons ni valeurs vides.
+La saisie reste libre : un nouvel état devient une suggestion après enregistrement.
+
 Les tableaux de la bibliothèque et des projets sont triés par nom croissant
 par défaut (ordre naturel français, avec prise en compte des nombres). Les
 en-têtes Nom, Type, État et Taille permettent d'alterner entre ordre croissant
